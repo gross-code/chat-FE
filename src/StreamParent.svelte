@@ -1,12 +1,11 @@
 <script>
-  import  { onMount } from "svelte";
+  import { onMount } from "svelte";
   import adapter from "webrtc-adapter";
   import { WebRtcPeer } from "kurento-utils";
   const KurentoClient = require("kurento-client");
 
   let webRtcPeerInstance;
   let pipeline;
-
 
   const args = {
     // Non-secure WebSocket
@@ -21,33 +20,50 @@
     // https://doc-kurento.readthedocs.io/en/latest/features/security.html#features-security-kms-wss
     //ws_uri: "wss://" + location.hostname + ":8433/kurento",
 
-    ice_servers: undefined
+    ice_servers: undefined,
   };
 
-  function setIceCandidateCallbacks(webRtcPeer, webRtcEp, onerror)
-{
-  webRtcPeer.on('icecandidate', function(candidate) {
-    console.log("Local candidate:",candidate);
+  function setIceCandidateCallbacks(webRtcPeer, webRtcEp, onerror) {
+    webRtcPeer.on("icecandidate", function (candidate) {
+      console.log("Local candidate:", candidate);
 
-    candidate = KurentoClient.getComplexType('IceCandidate')(candidate);
+      candidate = KurentoClient.getComplexType("IceCandidate")(candidate);
 
-    webRtcEp.addIceCandidate(candidate, onerror)
-  });
+      webRtcEp.addIceCandidate(candidate, onerror);
+    });
 
-  webRtcEp.on('IceCandidateFound', function(event) {
-    var candidate = event.candidate;
+    webRtcEp.on("IceCandidateFound", function (event) {
+      var candidate = event.candidate;
 
-    console.log("Remote candidate:",candidate);
+      console.log("Remote candidate:", candidate);
 
-    webRtcPeer.addIceCandidate(candidate, onerror);
-  });
-}
+      webRtcPeer.addIceCandidate(candidate, onerror);
+    });
+  }
 
+  async function startCapture(targetInput) {
+    var displayMediaOptions = {
+      video: {
+        cursor: "always",
+      },
+      audio: true,
+    };
+    try {
+      targetInput.srcObject = await navigator.mediaDevices.getDisplayMedia(
+        displayMediaOptions
+      );
+    } catch (err) {
+      console.error("Error: " + err);
+    }
+  }
 
   function startHandle(e) {
-  let videoInput = document.getElementById("videoInput");
-  let videoOutput = document.getElementById("videoOutput");
-  console.log(videoInput);
+    let videoInput = document.getElementById("videoInput");
+    let screenInput = document.getElementById("screenInput");
+    let videoOutput = document.getElementById("videoOutput");
+
+    startCapture(screenInput);
+    console.log(videoInput);
     const options = {
       localVideo: videoInput,
       remoteVideo: videoOutput,
@@ -88,11 +104,41 @@
           });
           webRtc.gatherCandidates(onError);
 
-          webRtc.connect(webRtc, function (error) {
+          pipeline.create("FaceOverlayFilter", function (error, filter) {
             if (error) return onError(error);
 
-            console.log("Loopback established");
+            console.log("Got FaceOverlayFilter");
+
+            filter.setOverlayedImage(
+              "https://github.com/Kurento/kurento-tutorial-js/blob/master/kurento-magic-mirror/img/mario-wings.png?raw=true",
+              -0.35,
+              -1.2,
+              1.6,
+              1.6,
+              function (error) {
+                if (error) return onError(error);
+
+                console.log("Set overlay image");
+              }
+            );
+
+            console.log("Connecting...");
+
+            client.connect(webRtc, filter, function (error) {
+              if (error) return onError(error);
+              console.log("WebRtcEndpoint --> filter");
+
+              client.connect(filter, webRtc, function (error) {
+                if (error) return onError(error);
+                console.log("filter --> WebRtcEndpoint");
+              });
+            });
           });
+          //webRtc.connect(webRtc, function (error) {
+          //  if (error) return onError(error);
+
+          //  console.log("Loopback established");
+          //});
         });
       });
     });
@@ -108,6 +154,12 @@
       pipeline.release();
       pipeline = null;
     }
+
+    const screenInput = document.getElementById("screenInput");
+    const tracks = screenInput.srcObject.getTracks();
+
+    tracks.forEach((track) => track.stop());
+    screenInput.srcObject = null;
   }
 
   function onError(error) {
@@ -121,6 +173,11 @@
 <div class="col-md-5">
   <h3>Local stream</h3>
   <video id="videoInput" autoplay width="480px" height="360px" />
+</div>
+
+<div class="col-md-5">
+  <h3>Screen stream</h3>
+  <video id="screenInput" autoplay width="480px" height="360px" />
 </div>
 
 <div class="col-md-5">
